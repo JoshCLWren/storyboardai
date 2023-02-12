@@ -53,3 +53,19 @@ DEFAULT_MODELS = (
     StableDiffusion4xUpscale,
     StableDiffusionDepth2Img,
 )
+
+MODEL_STR_TO_CLASS = {
+    "StableDiffusionV1": StableDiffusionV1,
+    "StableDiffusionV2": StableDiffusionV2,
+    "StableDiffusionV2Base": StableDiffusionV2Base,
+    "StableDiffusion4xUpscale": StableDiffusion4xUpscale,
+    "StableDiffusionDepth2Img": StableDiffusionDepth2Img,
+}
+
+MODEL_INT_TO_STR = {
+    1: StableDiffusionV1,
+    2: StableDiffusionV2,
+    3: StableDiffusionV2Base,
+    4: StableDiffusion4xUpscale,
+    5: StableDiffusionDepth2Img,
+}

@@ -1,3 +1,6 @@
+import random
+
+import models
 from stable_diff_2 import *
 
 
@@ -33,7 +36,9 @@ def menu():
         input_project_id = get_id_input()
         image_index = get_image_index(input_project_id)
         indexes_model = get_indexes_model(input_project_id, image_index)
-        prompt_prefix, prompt_suffix = get_prompt_prefix_suffix()
+        prompt_prefix, prompt_suffix = get_prompt_prefix_suffix(
+            project_id=input_project_id, image_index=image_index
+        )
         regenerate_image(
             input_project_id,
             image_index,
@@ -82,29 +87,48 @@ def get_prompt_path():
 
 
 def get_models():
-    print("Which Models shale we use?")
-    print(
-        f"Models to choose from: {[[index, model] for index, model in enumerate(constants.DefaultModels)]}"
-    )
-    print("shall we use all models? (y/n)")
-    if input() == "y":
-        return constants.DefaultModels
+    print("Models to choose from")
+    index = 1
+    display_models = {
+        index + 1: model.__name__ for index, model in enumerate(models.DEFAULT_MODELS)
+    }
+    for key, value in display_models.items():
+        print(f"{key}: {value}")
+    print(f"{index + 1}: All Models")
     users_models = {}
-    display_models = [constants.DefaultModels]
     while True:
-        print("Current Chosen Models: ", users_models)
+        print("Current Chosen Models:")
+        if users_models:
+            for key, value in users_models.items():
+                print(f"{key}: {value}")
+        else:
+            print("None")
         print(
-            "Enter the number of the model you want to add to the list, or press enter to finish"
+            "Enter the number of the model you want to add or remove from available and your models, or press enter to finish"
         )
-        user_input = input()
         if display_models:
-            for index, model in enumerate(display_models):
-                print(f"{index}: {model}")
-                if user_input == str(index):
-                    users_models.append(model)
-                    display_models.pop(index)
-                if user_input == "":
+            print("0: All Models")
+            for key, value in display_models.items():
+                print(f"{key}: {value}")
+            try:
+                user_input = input()
+                if user_input.lower() in ["", " ", "q", "quit", "x", "exit"]:
                     break
+                user_input = int(user_input)
+            except ValueError:
+                print("Invalid input, try again")
+                continue
+            if user_input in users_models:
+                # add the model back to the dict of models to choose from
+                display_models[user_input] = users_models.pop(user_input)
+            if user_input == 0:
+                users_models |= display_models
+                display_models = {}
+            if user_input not in display_models:
+                print("Invalid input, try again")
+                continue
+            users_models[user_input] = display_models.pop(user_input)
+            # remove the model from the dict of models to choose from
         else:
             print("Looks like you've chosen all the models")
             break
@@ -112,9 +136,8 @@ def get_models():
     return list(users_models)
 
 
-def get_image_index(project_id):
+def get_image_index(project_id, page=1, next_page=True):
     print("Enter image index or press enter to use default")
-    page = 1
     while True:
         print(
             f"Current image indices page {page}: ",
@@ -124,40 +147,70 @@ def get_image_index(project_id):
             10,
             project_id,
         )
-        print(images)
-        print("Enter the index of the image you want to regenerate")
-        print("Or press enter to go to the next page")
-        index_input = input()
-        if index_input == "":
-            page += 1
-        elif index_input in images:
-            return index_input
-        else:
-            break
+        if len(images) < 10:
+            next_page = False
+        for index, image in enumerate(images):
+            print(f"{index}: {image.prompt_line}")
+
+        while next_page:
+            print("Enter the index of the image you want to regenerate")
+            print("Or press enter to go to the next page")
+            index_input = input()
+            if not index_input:
+                page += 1
+            try:
+                index_input = int(index_input)
+                if index_input in range(len(images)):
+                    return index_input
+            except ValueError:
+                print("Invalid input, try again")
+
+        if not next_page:
+            print("Looks like you've reached the end of the list")
+            print("Enter the index of the image you want to regenerate")
+            print("or press enter to start over")
+            index_input = input()
+            if index_input == "":
+                page = 0
+                next_page = True
+            try:
+                index_input = int(index_input)
+                if index_input in range(len(images)):
+                    return index_input
+            except ValueError:
+                print("Invalid input, try again")
 
 
 def get_indexes_model(project_id, image_index):
-    print("Enter model name or press enter to use default of StableDiffusionV1")
+    print("Checking models for image..")
+
     # find the path of the image and list any model directory names that have an image in them
     project_path = f"outputs/{project_id}/{image_index}"
-
-    available_models = [
-        model
-        for model in os.listdir(project_path)
-        if model in models.DEFAULT_MODELS
-        and os.path.exists(f"{project_path}/{model}/{image_index}.png")
-    ]
-    print("Available models: ")
-    for model_index, model in enumerate(available_models):
-        print(f"{model_index}: {model}")
-    print("Enter the number of the model you want to regenerate or press enter to exit")
-    model_input = input()
-    if available_models[model_input] in available_models:
-        return available_models[model_input]
-    if model_input == "":
+    index_path_contents = [m for m in os.listdir(project_path)]
+    model_dirs = [stable for stable in index_path_contents if "Stable" in stable]
+    available_models = {}
+    for index, model_dir in enumerate(model_dirs):
+        model_dir_path = os.path.join(project_path, model_dir)
+        if _model_dir_contents := os.listdir(model_dir_path):
+            available_models[index] = model_dir
+    if not available_models:
+        print("No models found")
         return None
-    print("Invalid model selection")
-    return get_indexes_model(project_id, image_index)
+    if len(available_models) == 1:
+        return list(available_models.values())[0]
+    print("Available models: ")
+    for model_index, model in available_models.items():
+        print(f"{model_index}: {model}")
+    print("Enter model name or press enter to use default of StableDiffusionV1")
+    model_input = input()
+    while model_input:
+        try:
+            model_input = int(model_input)
+            if available_models[model_input] in available_models:
+                return available_models[model_input]
+        except ValueError:
+            print("Invalid model selection")
+    return "StableDiffusionV1"
 
 
 def get_prompt(project_id, image_index):
@@ -192,7 +245,10 @@ def ask_for_random(fragment_type, fragment, current_prompt):
     if result == "y":
         while True:
             result = random.choice(fragment)
-            print(f"Do you like: {result} {current_prompt} y/n?")
+            if fragment_type == "prefix":
+                print(f"Do you approve this preview: {result} {current_prompt} y/n?")
+            else:
+                print(f"Do you approve this preview: {current_prompt} {result} y/n?")
             result_approved = input()
             if result_approved == "y":
                 return result

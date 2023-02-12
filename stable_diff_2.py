@@ -12,6 +12,7 @@ from diffusers import (
     StableDiffusionPipeline,
 )
 
+import cli
 import constants
 import models
 
@@ -155,6 +156,10 @@ def make_image(
         if verbosity:
             print(f"Generating image with {cls.title}")
     prompt = regenerate_prompt or image_class.prompt_line
+    # check if prompt has curly braces anywhere in the string and if not add them to the beginning and end
+    if "{" not in prompt and "}" not in prompt:
+        prompt = "{" + prompt + "}"
+
     if kwargs.get("queued"):
         queue.enqueue(
             cls.txt2img,
@@ -208,7 +213,7 @@ class Project:
         self.models = []
         # scan the image index folders to find each folder name that was created
         for index_folder in os.listdir(self.output_folder):
-            if index_folder != "prompt.txt":
+            if index_folder not in ["prompt.txt", "index.html"]:
                 for model in os.listdir(f"{self.output_folder}/{index_folder}"):
                     if model not in self.models:
                         self.models.append(model)
@@ -250,9 +255,59 @@ class Project:
     @staticmethod
     def config_class(cls):
         if isinstance(cls, str):
-            cls = globals()[cls]
+            cls = models.MODEL_STR_TO_CLASS.get(cls, None)
+        if isinstance(cls, int):
+            cls = models.MODEL_INT_TO_STR.get(cls, None)
+        if not cls:
+            raise ValueError("Model class not found")
         sd = cls()
         return StableDiffusionConfig(title=cls.__name__, **sd.__dict__)
+
+    async def html_render(self):
+        """
+        Render an html page with all the images
+        """
+        html = f"""
+        <html>
+        <head>
+        <style>
+        .grid {{
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-gap: 10px;
+            grid-auto-rows: minmax(100px, auto);
+        }}
+        .grid-item {{
+            background-color: rgba(255, 255, 255, 0.8);
+            border: 1px solid rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            font-size: 30px;
+            text-align: center;
+        }}
+        </style>
+        </head>
+        <body>
+        <div class="grid">
+        """
+        absolute_path = "/Users/joshwren/Code/playground/storyboardai/"
+        for image_index in self.image_indices:
+            for image in image_index.saved_images:
+                # this is a local path to a local file on a local machine
+                # we need to ensure that localhost is not prepended to the path
+                # so that the images can be found
+                html += f"""
+                <div class="grid-item">
+                <h3>{image_index.prompt_line}</h3>
+                <img src="{image.replace(absolute_path, "")}" />
+                </div>
+                """
+        html += """
+        </div>
+        </body>
+        </html>
+        """
+        with open(f"templates/projects/{self.id}.html", "w") as f:
+            f.write(html)
 
 
 @dataclass
@@ -298,9 +353,12 @@ class ImageIndex:
         if self.index_folder is None:
             raise ValueError("index_folder must be set")
         for cls in classes:
+            class_folder = None
             if isinstance(cls, str):
                 class_folder = f"{self.index_folder}/{cls}"
-            else:
+            if isinstance(cls, int):
+                class_folder = f"{self.index_folder}/{models.MODEL_INT_TO_STR[cls]}"
+            if type(cls) not in [str, int]:
                 class_folder = f"{self.index_folder}/{cls.__name__}"
             if not os.path.exists(class_folder):
                 os.mkdir(class_folder)
@@ -345,13 +403,28 @@ def resume_batch_images(id: str, **kwargs):
     project.models_to_images(**kwargs)
 
 
-def from_single_prompt(prompt: str = None):
+def from_single_prompt(incoming_prompt: str = None):
     """
     Generate A batch of images for each line break of the prompt
     """
-    if not prompt:
-        prompt = input("Enter prompt: ")
-    new_project = Project(id=str(uuid.uuid4()), prompt=prompt, models=MODELS)
+
+    prompt = incoming_prompt or input("Enter prompt: ")
+    prompt = " {{" + prompt + "}} "  # this emphasizes the prompt for stable diffusion
+    prefix = cli.ask_for_random(
+        "prefix", constants.PROMPT_PREFIX_IDEAS, current_prompt=prompt
+    )
+
+    prompt = prefix + prompt
+
+    suffix = cli.ask_for_random(
+        "suffix", constants.PROMPT_SUFFIX_IDEAS, current_prompt=prompt
+    )
+
+    prompt = prompt + suffix
+
+    new_project = Project(
+        id=str(uuid.uuid4()), prompt=prompt, models=models.DEFAULT_MODELS
+    )
     new_project.setup_prompt_indices()
     new_project.models_to_images()
 
@@ -389,6 +462,8 @@ def regenerate_image(
     image_index = project.image_indices[index]
     sd_config = project.config_class(model)
     current_prompt = image_index.prompt_line
+    # add curly braces to the prompt to emphasize it for stable diffusion
+    current_prompt = " {{" + current_prompt + "}} "
     if prompt_prefix:
         current_prompt = f"{prompt_prefix} {current_prompt}"
     if prompt_suffix:

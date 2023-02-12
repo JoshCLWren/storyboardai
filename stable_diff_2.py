@@ -416,11 +416,34 @@ def regenerate_image(
     make_image(sd_config, image_index, regenerate_prompt=current_prompt)
 
 
+def paginated_images(
+    page: int, page_size: int, project_id: str, model_filter: str = None
+):
+    """
+    Get a paginated list of images for a projects
+    """
+    project = Project(id=project_id)
+    project.load()
+    image_indices = project.image_indices
+    start = page * page_size
+    end = start + page_size
+    if not model_filter:
+        return image_indices[start:end]
+    # only return images that have an image file in a
+    # folder with the model_filter name for the given indices
+    filtered_indices = []
+    for image_index in image_indices[start:end]:
+        for saved_image in image_index.saved_images:
+            # example of saved_image path:
+            # 'outputs/33527d88-636b-4833-876d-6d0665d970b5/9/StableDiffusionV1/9.png'
+            # we want to check if StableDiffusionV1 is in the path but not match StableDiffusionV1Base
+            saved_images_model = saved_image.split("/")[-2]
+            if model_filter != saved_images_model:
+                print(f"model_filter {model_filter} not in {saved_images_model}")
+            else:
+                filtered_indices.append(saved_image)
+    return filtered_indices
+
+
 if __name__ == "__main__":
-    regenerate_image(
-        PROJECT_ID,
-        0,
-        "StableDiffusionV1",
-        prompt_prefix="lo res",
-        prompt_suffix="hanna barbara",
-    )
+    print(paginated_images(0, 10, PROJECT_ID, model_filter="StableDiffusionV1"))

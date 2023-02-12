@@ -445,5 +445,9 @@ def paginated_images(
     return filtered_indices
 
 
-if __name__ == "__main__":
-    print(paginated_images(0, 10, PROJECT_ID, model_filter="StableDiffusionV1"))
+def print_image(image_path: str):
+    """
+    Print an image to the console
+    """
+    img = PIL.Image.open(image_path)
+    img.show()

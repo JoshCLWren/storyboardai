@@ -212,7 +212,7 @@ class Project:
                         f"{image_index.index_folder}/{model}/{index}.png"
                     ):
                         image_index.saved_images.append(
-                            f"{image_index.index_folder}/{model}/{model}.png"
+                            f"{image_index.index_folder}/{model}/{index}.png"
                         )
                 self.image_indices.append(image_index)
 
@@ -333,9 +333,9 @@ def resume_batch_images(id: str):
     project.models_to_images()
 
 
-def genereate_from_prompt(prompt: str = None):
+def from_single_prompt(prompt: str = None):
     """
-    Generate A batch of images for each line of the prompt
+    Generate A batch of images for each line break of the prompt
     """
     if not prompt:
         prompt = input("Enter prompt: ")
@@ -344,5 +344,23 @@ def genereate_from_prompt(prompt: str = None):
     new_project.models_to_images()
 
 
+def delete_filtered_images(project_id: str):
+    """
+    Scan a projects image files for any images that have been filtered by nsfw filter and delete them
+    Filtered images are all black
+    """
+    breakpoint()
+    project = Project(id=project_id)
+    project.load()
+    for image_index in project.image_indices:
+        for saved_image in image_index.saved_images:
+            img = PIL.Image.open(saved_image)
+            if img.getbbox() is None:
+                print(f"Deleting {saved_image}")
+                os.remove(saved_image)
+            else:
+                print(f"Keeping {saved_image}")
+
+
 if __name__ == "__main__":
-    genereate_from_prompt()
+    delete_filtered_images("33527d88-636b-4833-876d-6d0665d970b5")

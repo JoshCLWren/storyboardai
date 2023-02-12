@@ -8,13 +8,9 @@ from io import BytesIO
 import PIL
 import requests
 import torch
-from diffusers import (
-    DiffusionPipeline,
-    DPMSolverMultistepScheduler,
-    StableDiffusionDepth2ImgPipeline,
-    StableDiffusionPipeline,
-    StableDiffusionUpscalePipeline,
-)
+from diffusers import (DiffusionPipeline, DPMSolverMultistepScheduler,
+                       StableDiffusionDepth2ImgPipeline,
+                       StableDiffusionPipeline, StableDiffusionUpscalePipeline)
 
 
 class StableDiffusionConfig:
@@ -102,15 +98,6 @@ class StableDiffusionDepth2Img:
     strength = 0.7
 
 
-MODELS = [
-    StableDiffusionV1,
-    StableDiffusionV2,
-    StableDiffusionV2Base,
-    StableDiffusion4xUpscale,
-    StableDiffusionDepth2Img,
-]
-
-
 def generate_all_models(**options):
     """
     Generate images with the Stable Diffusion models.
@@ -141,7 +128,7 @@ def generate_all_models(**options):
 
 def make_image(
     cls,
-    images_index,
+    image_class,
     verbosity=True,
     speech=True,
 ):
@@ -149,24 +136,23 @@ def make_image(
     Generate an image with the Stable Diffusion model and save it to the output folder.
     Args:
         cls: The Stable Diffusion model class
-        images_index: The image index object with state information regarding file paths and propmt
+        image_class: The image object with stateful information regarding file paths and prompts
         verbosity: Whether to print steps to the console
         speech: Whether to use the speech synthesizer to say the model name
     """
-
+    # check if the image has already been generated
+    for image in image_class.saved_images:
+        if cls.title in image:
+            if verbosity:
+                print(f"Image with {cls.title} already exists")
+            return
     if verbosity:
         print(f"Generating image with {cls.title}")
-
-    img = sd_config.txt2img(prompt=images_index.prompt_line)
-    save_path = images_index.save_image(cls, img)
+    img = cls.txt2img(prompt=image_class.prompt_line)
+    save_path = image_class.save_image(cls, img)
     if speech:
         os.system(f"say '{cls.title} done'")
     print(f"Generated image with {cls.title} at {save_path}")
-
-
-def config_class(cls):
-    sd = cls()
-    return StableDiffusionConfig(title=cls.__name__, **sd.__dict__)
 
 
 @dataclass
@@ -176,9 +162,11 @@ class Project:
     """
 
     id: str
-    prompt: str
+    prompt: str = ""
     master_folder: str = "outputs"
     output_folder: str = None
+    image_indices: list = field(default_factory=list)
+    models: list = field(default_factory=list)
 
     def __post_init__(self):
         """
@@ -189,8 +177,64 @@ class Project:
             os.mkdir(self.master_folder)
         if not os.path.exists(self.output_folder):
             os.mkdir(self.output_folder)
-        with open(f"{self.output_folder}/prompt.txt", "w") as f:
-            f.write(self.prompt)
+        if not os.path.exists(f"{self.output_folder}/prompt.txt"):
+            with open(f"{self.output_folder}/prompt.txt", "w") as f:
+                f.write(self.prompt)
+
+    def load(self):
+        """
+        Load a project from the master folder
+        """
+        self.output_folder = f"{self.master_folder}/{self.id}"
+        with open(f"{self.output_folder}/prompt.txt", "r") as f:
+            self.prompt = f.read()
+        self.models = []
+        # scan the image index folders to find each folder name that was created
+        for folder in os.listdir(self.output_folder):
+            if folder == "prompt.txt":
+                continue
+            for subfolder in os.listdir(f"{self.output_folder}/{folder}"):
+                if subfolder not in self.models and not subfolder.endswith(".txt"):
+                    self.models.append(subfolder)
+        self.models = set(self.models)
+        self.setup_prompt_indices()
+
+    def setup_prompt_indices(self):
+        for index, line in enumerate(self.prompt.splitlines()):
+            if line:
+                print(f"index: {index}, line: {line}")
+                image_index = ImageIndex(index=index, project=self, prompt_line=line)
+                image_index.add_indexes_folder()
+                image_index.add_prompts_file()
+                image_index.add_class_folders(self.models)
+                for model in self.models:
+                    if os.path.exists(
+                        f"{image_index.index_folder}/{model}/{index}.png"
+                    ):
+                        image_index.saved_images.append(
+                            f"{image_index.index_folder}/{model}/{model}.png"
+                        )
+                self.image_indices.append(image_index)
+
+    def models_to_images(self):
+        """
+        Generate images for each model in the project
+        """
+        for model in self.models:
+            sd_config = self.config_class(model)
+            for image_index in self.image_indices:
+                print(f"Generating image for line {image_index.index} with {model}")
+                make_image(
+                    sd_config,
+                    image_index,
+                )
+
+    @staticmethod
+    def config_class(cls):
+        if isinstance(cls, str):
+            cls = globals()[cls]
+        sd = cls()
+        return StableDiffusionConfig(title=cls.__name__, **sd.__dict__)
 
 
 @dataclass
@@ -236,7 +280,10 @@ class ImageIndex:
         if self.index_folder is None:
             raise ValueError("index_folder must be set")
         for cls in classes:
-            class_folder = f"{self.index_folder}/{cls.__name__}"
+            if isinstance(cls, str):
+                class_folder = f"{self.index_folder}/{cls}"
+            else:
+                class_folder = f"{self.index_folder}/{cls.__name__}"
             if not os.path.exists(class_folder):
                 os.mkdir(class_folder)
             if os.path.exists(class_folder):
@@ -256,24 +303,46 @@ class ImageIndex:
         return save_path
 
 
-if __name__ == "__main__":
-    # open input/prison_full.txt
-    with open("input/prison_full.txt", "r") as f:
+MODELS = [
+    StableDiffusionV1,
+    StableDiffusionV2,
+    StableDiffusionV2Base,
+    StableDiffusion4xUpscale,
+    StableDiffusionDepth2Img,
+]
+
+
+def batch_generate_images(prompt_path: str = "input/prison_full.txt"):
+    """
+    Generate A batch of images for each line of the prompt
+    """
+    with open(prompt_path, "r") as f:
         prompt = f.read()
-    new_project = Project(id=str(uuid.uuid4()), prompt=prompt)
-    image_indexes = []
-    for index, line in enumerate(new_project.prompt.splitlines()):
-        if line:
-            print(f"index: {index}, line: {line}")
-            image_index = ImageIndex(index=index, project=new_project, prompt_line=line)
-            image_index.add_indexes_folder()
-            image_index.add_prompts_file()
-            image_index.add_class_folders(MODELS)
-            image_indexes.append(image_index)
-    for model in MODELS:
-        sd_config = config_class(model)
-        for image_index in image_indexes:
-            make_image(
-                sd_config,
-                image_index,
-            )
+
+    new_project = Project(id=str(uuid.uuid4()), prompt=prompt, models=MODELS)
+    new_project.setup_prompt_indices()
+    new_project.models_to_images()
+
+
+def resume_batch_images(id: str):
+    """
+    Resume a batch of images for each line of the prompt
+    """
+    project = Project(id=id)
+    project.load()
+    project.models_to_images()
+
+
+def genereate_from_prompt(prompt: str = None):
+    """
+    Generate A batch of images for each line of the prompt
+    """
+    if not prompt:
+        prompt = input("Enter prompt: ")
+    new_project = Project(id=str(uuid.uuid4()), prompt=prompt, models=MODELS)
+    new_project.setup_prompt_indices()
+    new_project.models_to_images()
+
+
+if __name__ == "__main__":
+    genereate_from_prompt()

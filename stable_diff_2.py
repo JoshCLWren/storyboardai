@@ -5,6 +5,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
+import numpy as np
 import PIL
 from diffusers import (
     DiffusionPipeline,
@@ -147,34 +148,55 @@ def make_image(
         regenerate_prompt: Whether to regenerate the image if it already exists and use a different prompt
     """
     # check if the image has already been generated
-    if not regenerate_prompt:
-        for image in image_class.saved_images:
-            if cls.title in image:
-                if verbosity:
-                    print(f"Image with {cls.title} already exists")
-                return
-        if verbosity:
-            print(f"Generating image with {cls.title}")
-    prompt = regenerate_prompt or image_class.prompt_line
-    # check if prompt has curly braces anywhere in the string and if not add them to the beginning and end
-    if "{" not in prompt and "}" not in prompt:
-        prompt = "{" + prompt + "}"
+    render_count = 0
+    re_render = False
+    if regenerate_prompt:
+        re_render = True
+    while render_count < 5:
+        if not regenerate_prompt and not re_render:
+            for image in image_class.saved_images:
+                if cls.title in image:
+                    if verbosity:
+                        print(f"Image with {cls.title} already exists")
+                    return
+            if verbosity:
+                print(f"Generating image with {cls.title}")
+        prompt = regenerate_prompt or image_class.prompt_line
+        # check if prompt has curly braces anywhere in the string and if not add them to the beginning and end
+        if "{" not in prompt and "}" not in prompt:
+            prompt = "{" + prompt + "}"
 
-    if kwargs.get("queued"):
-        queue.enqueue(
-            cls.txt2img,
-            prompt=prompt,
-            image_class=image_class,
-            result_ttl=0,
-            job_timeout=600,
-            job_id=str(uuid.uuid4()),
+        if kwargs.get("queued"):
+            queue.enqueue(
+                cls.txt2img,
+                prompt=prompt,
+                image_class=image_class,
+                result_ttl=0,
+                job_timeout=600,
+                job_id=str(uuid.uuid4()),
+            )
+            return
+        img = cls.txt2img(prompt=prompt)
+        save_path = image_class.save_image(cls, img)
+        # check if img has been turned all black due to the nsfw filter
+        img = PIL.Image.open(save_path)
+        if img.getbbox() is not None:
+            print(f"Generated image with {cls.title} at {save_path}")
+            break
+        os.remove(save_path)
+        render_count += 1
+        print("Image has been turned all black due to nsfw filter")
+        print(f"This has happened {render_count} times so far... something is wrong?!")
+        re_render = True
+    if render_count > 5:
+        print(
+            f"Image has been turned all black due to nsfw filter {render_count} times"
         )
+        print("Skipping image... rethink your prompt")
         return
-    img = cls.txt2img(prompt=prompt)
-    save_path = image_class.save_image(cls, img)
+
     if speech:
         os.system(f"say '{cls.title} done'")
-    print(f"Generated image with {cls.title} at {save_path}")
 
 
 @dataclass

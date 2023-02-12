@@ -1,5 +1,6 @@
 # make sure you're logged in with `huggingface-cli login`
 import os
+import shutil
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -8,9 +9,13 @@ from io import BytesIO
 import PIL
 import requests
 import torch
-from diffusers import (DiffusionPipeline, DPMSolverMultistepScheduler,
-                       StableDiffusionDepth2ImgPipeline,
-                       StableDiffusionPipeline, StableDiffusionUpscalePipeline)
+from diffusers import (
+    DiffusionPipeline,
+    DPMSolverMultistepScheduler,
+    StableDiffusionDepth2ImgPipeline,
+    StableDiffusionPipeline,
+    StableDiffusionUpscalePipeline,
+)
 
 
 class StableDiffusionConfig:
@@ -129,6 +134,7 @@ def generate_all_models(**options):
 def make_image(
     cls,
     image_class,
+    regenerate_prompt=None,
     verbosity=True,
     speech=True,
 ):
@@ -139,16 +145,19 @@ def make_image(
         image_class: The image object with stateful information regarding file paths and prompts
         verbosity: Whether to print steps to the console
         speech: Whether to use the speech synthesizer to say the model name
+        regenerate_prompt: Whether to regenerate the image if it already exists and use a different prompt
     """
     # check if the image has already been generated
-    for image in image_class.saved_images:
-        if cls.title in image:
-            if verbosity:
-                print(f"Image with {cls.title} already exists")
-            return
-    if verbosity:
-        print(f"Generating image with {cls.title}")
-    img = cls.txt2img(prompt=image_class.prompt_line)
+    if not regenerate_prompt:
+        for image in image_class.saved_images:
+            if cls.title in image:
+                if verbosity:
+                    print(f"Image with {cls.title} already exists")
+                return
+        if verbosity:
+            print(f"Generating image with {cls.title}")
+    prompt = regenerate_prompt or image_class.prompt_line
+    img = cls.txt2img(prompt=prompt)
     save_path = image_class.save_image(cls, img)
     if speech:
         os.system(f"say '{cls.title} done'")
@@ -362,5 +371,56 @@ def delete_filtered_images(project_id: str):
                 print(f"Keeping {saved_image}")
 
 
+PROJECT_ID = "33527d88-636b-4833-876d-6d0665d970b5"
+
+
+def regenerate_image(
+    project_id: str,
+    index: int,
+    model: str,
+    prompt_prefix: str = None,
+    prompt_suffix: str = None,
+):
+    """
+    Regenerate a single image
+    """
+    project = Project(id=project_id)
+    project.load()
+    image_index = project.image_indices[index]
+    sd_config = project.config_class(model)
+    current_prompt = image_index.prompt_line
+    if prompt_prefix:
+        current_prompt = f"{prompt_prefix} {current_prompt}"
+    if prompt_suffix:
+        current_prompt = f"{current_prompt} {prompt_suffix}"
+    # make copies of the current images
+    backup_folder = f"{image_index.index_folder}/backup"
+    backup_index = 0
+    backed_up = False
+    while not backed_up:
+        backup_folder = f"{backup_folder}_{backup_index}"
+        if not os.path.exists(backup_folder):
+            os.mkdir(backup_folder)
+            backed_up = True
+        else:
+            backup_index += 1
+    for saved_image in image_index.saved_images:
+        # find the model name in the saved image path
+        model_name = saved_image.split("/")[-2]
+        os.mkdir(f"{backup_folder}/{model_name}")
+        shutil.copy(saved_image, f"{backup_folder}/{model_name}")
+    # make new prompt txt file in the folder of the model being regenerated
+    prompt_file = f"{image_index.index_folder}/{sd_config.title}/{image_index.index}_prompt_regen.txt"
+    with open(prompt_file, "w") as f:
+        f.write(current_prompt)
+    make_image(sd_config, image_index, regenerate_prompt=current_prompt)
+
+
 if __name__ == "__main__":
-    delete_filtered_images("33527d88-636b-4833-876d-6d0665d970b5")
+    regenerate_image(
+        PROJECT_ID,
+        0,
+        "StableDiffusionV1",
+        prompt_prefix="lo res",
+        prompt_suffix="hanna barbara",
+    )

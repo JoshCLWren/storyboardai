@@ -2,7 +2,7 @@ from redis import Redis
 from rq import Queue
 
 from constants import PROJECT_ID
-from stable_diff_2 import *
+from stable_diffusers import *
 
 if __name__ == "__main__":
     # Tell RQ what Redis connection to use

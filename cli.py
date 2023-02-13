@@ -1,7 +1,7 @@
 import random
 
 import models
-from stable_diff_2 import *
+from stable_diffusers import *
 
 
 def menu():

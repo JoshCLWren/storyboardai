@@ -4,9 +4,16 @@ import torch
 from diffusers import (
     DiffusionPipeline,
     StableDiffusionDepth2ImgPipeline,
+    StableDiffusionImageVariationPipeline,
     StableDiffusionPipeline,
     StableDiffusionUpscalePipeline,
 )
+
+
+@dataclass
+class StableDiffusionImageVariation:
+    repo_name = "lambdalabs/sd-image-variations-diffusers"
+    pipeline = StableDiffusionImageVariationPipeline
 
 
 @dataclass

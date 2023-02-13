@@ -4,7 +4,7 @@ import aiohttp
 import aiohttp_jinja2
 import jinja2
 
-import stable_diff_2
+import stable_diffusers
 
 app = aiohttp.web.Application()
 aiohttp_jinja2.setup(app, loader=jinja2.FileSystemLoader("templates"))
